@@ -15,13 +15,15 @@ hours. The data does not state a currency, so costs are shown as "cost units".
 
 from __future__ import annotations
 
+import io
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import pandas as pd
 
-from .validation import ValidationReport, validate_bus_table, validate_schools
+from .distances import OSRM_MAX_POINTS, haversine_miles
+from .validation import SCHOOL_COLUMNS, ValidationReport, validate_bus_table, validate_schools
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DATA_DIR = PROJECT_ROOT
@@ -41,16 +43,75 @@ MODEL_LABELS = {
 }
 MODEL_UNITS = {"fixed": "per bus", "distance": "per mile", "time": "per hour"}
 
+# Default solver time limits in seconds, used by the dashboard, demo.py and
+# benchmark.py unless the caller passes its own limit. The fixed model is exact
+# and usually proves optimality well inside its limit; the time left groups
+# nearby schools at the same cost.
+# The routing models are heuristic: guided local search keeps improving until
+# the limit is reached, so a run uses the full limit. A longer limit gives the
+# search more time; it does not guarantee a cheaper plan.
+DEFAULT_TIME_LIMITS = {"fixed": 20.0, "distance": 300.0, "time": 300.0}
+MIN_TIME_LIMIT = 5
+MAX_TIME_LIMIT = 600
+
 CURRENCY_LABEL = "cost units"
 
 
 @dataclass(frozen=True)
 class Event:
-    """Event destination. Coordinates come from the challenge data README."""
+    """Event destination. The default coordinates come from the challenge data README.
+
+    Every matrix, route and validation check takes the destination from here,
+    so a different ``Event`` changes the optimisation, not only the label.
+    """
 
     name: str = "Principality Stadium, Westgate St, Cardiff CF10 1NS"
     latitude: float = 51.478283
     longitude: float = -3.182652
+
+    @property
+    def short_name(self) -> str:
+        """Name up to the first comma, for route labels ("A -> B -> Principality Stadium")."""
+        return self.name.split(",")[0].strip() or "Event"
+
+
+DEFAULT_EVENT = Event()
+MAX_VENUE_NAME = 120
+
+
+def make_event(name: object, latitude: object, longitude: object) -> Event:
+    """A validated ``Event``. Raises ValueError listing every problem.
+
+    Rejects an empty name, missing or non-numeric coordinates, and values
+    outside latitude -90..90 or longitude -180..180.
+    """
+    problems = []
+    text = "" if name is None else str(name).strip()
+    if not text:
+        problems.append("Enter a venue name.")
+    elif len(text) > MAX_VENUE_NAME:
+        problems.append(f"The venue name must be at most {MAX_VENUE_NAME} characters.")
+    coords = []
+    for label, value, low, high in (("Latitude", latitude, -90, 90), ("Longitude", longitude, -180, 180)):
+        number = _coordinate(value)
+        if number is None:
+            problems.append(f"{label} is missing or not a number.")
+        elif not low <= number <= high:
+            problems.append(f"{label} must be between {low} and {high}, got {number:g}.")
+        coords.append(number)
+    if problems:
+        raise ValueError(" ".join(problems))
+    return Event(text, float(coords[0]), float(coords[1]))
+
+
+def _coordinate(value: object) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = float(value.strip()) if isinstance(value, str) else float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
 
 
 @dataclass
@@ -96,6 +157,20 @@ class Dataset:
         for model, rates in self.rates.items():
             report.check_capacity(schools, model, rates)
         return Dataset(schools=schools, rates=self.rates, event=self.event, report=report)
+
+    def with_price_change(self, model: str, percent: int) -> "Dataset":
+        """Return a copy where every bus price of ``model`` changes by ``percent`` (what-if only).
+
+        The original rates are not changed. ``percent`` must be a whole number
+        from -90 to +300, so every price stays positive.
+        """
+        if model not in self.rates:
+            raise ValueError(f"Cost model {model!r} is not available.")
+        if isinstance(percent, bool) or not isinstance(percent, int) or not -90 <= percent <= 300:
+            raise ValueError("The price change must be a whole number of percent from -90 to 300.")
+        rates = {m: dict(r) for m, r in self.rates.items()}
+        rates[model] = {size: price * (100 + percent) / 100 for size, price in rates[model].items()}
+        return Dataset(schools=self.schools.copy(), rates=rates, event=self.event, report=self.report)
 
 
 def whole_attendance(value: object) -> int | None:
@@ -160,12 +235,24 @@ def _read_csv(path: Path, report: ValidationReport) -> pd.DataFrame | None:
     return frame
 
 
-def load_dataset(data_dir: Path | str = DEFAULT_DATA_DIR) -> Dataset:
-    """Load and validate all challenge files from ``data_dir``."""
+def load_dataset(
+    data_dir: Path | str = DEFAULT_DATA_DIR,
+    schools_csv: bytes | None = None,
+    event: Event | None = None,
+) -> Dataset:
+    """Load and validate all challenge files from ``data_dir``.
+
+    ``schools_csv``: content of an uploaded school file to use instead of
+    ``attendants_dataset.csv`` (same columns). The file on disk is not changed.
+    ``event``: destination to use instead of ``DEFAULT_EVENT``.
+    """
     data_dir = Path(data_dir)
     report = ValidationReport()
 
-    raw_schools = _read_csv(data_dir / SCHOOLS_FILE, report)
+    if schools_csv is None:
+        raw_schools = _read_csv(data_dir / SCHOOLS_FILE, report)
+    else:
+        raw_schools = _read_csv_bytes(schools_csv, "uploaded school file", report)
     schools = validate_schools(raw_schools, report)
 
     rates: dict[str, dict[int, float]] = {}
@@ -185,4 +272,122 @@ def load_dataset(data_dir: Path | str = DEFAULT_DATA_DIR) -> Dataset:
     for model, table in rates.items():
         report.check_capacity(schools, model, table)
 
-    return Dataset(schools=schools, rates=rates, report=report)
+    return Dataset(schools=schools, rates=rates, event=event or DEFAULT_EVENT, report=report)
+
+
+# --------------------------------------------------------------------------- #
+# Uploaded school files and venue files
+# --------------------------------------------------------------------------- #
+
+MAX_UPLOAD_BYTES = 2_000_000
+SCHOOL_TEMPLATE_CSV = (
+    "outcode,latitude,longitude,attendants\n"
+    "CF10,51.4816,-3.1791,32\n"
+    "CF14,51.5230,-3.2010,18\n"
+    "NP20,51.5880,-2.9980,25\n"
+)
+VENUE_COLUMNS = {"name", "latitude", "longitude"}
+FAR_FROM_VENUE_MILES = 150.0
+
+
+def _read_csv_bytes(content: bytes, label: str, report: ValidationReport) -> pd.DataFrame | None:
+    """Read uploaded CSV bytes as text columns (same conventions as ``_read_csv``)."""
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        report.errors.append(f"Could not read the {label}: it is not UTF-8 text. Save it as CSV (UTF-8).")
+        return None
+    try:
+        frame = pd.read_csv(io.StringIO(text), dtype=str, skipinitialspace=True)
+    except (pd.errors.EmptyDataError, pd.errors.ParserError) as exc:
+        report.errors.append(f"Could not read the {label}: {exc}")
+        return None
+    frame.columns = [str(c).strip().lower() for c in frame.columns]
+    return frame
+
+
+@dataclass
+class SchoolUpload:
+    """Result of checking an uploaded school file. Usable only when ``errors`` is empty.
+
+    Invalid rows are never dropped: any invalid row rejects the whole file, so
+    a plan cannot silently leave schools out.
+    """
+
+    schools: pd.DataFrame
+    errors: list[str]
+    warnings: list[str]
+
+    @property
+    def ok(self) -> bool:
+        return not self.errors
+
+    @property
+    def total_attendees(self) -> int:
+        return int(self.schools["attendees"].sum()) if len(self.schools) else 0
+
+
+def check_school_upload(content: bytes, max_bytes: int = MAX_UPLOAD_BYTES) -> SchoolUpload:
+    """Validate an uploaded school CSV (outcode, latitude, longitude, attendants)."""
+    empty = validate_schools(None, ValidationReport())
+    if not content or not content.strip():
+        return SchoolUpload(empty, ["The file is empty. Use the template: one header row, then one row per school."], [])
+    if len(content) > max_bytes:
+        return SchoolUpload(empty, [f"The file is {len(content) / 1e6:.1f} MB; the limit is "
+                                    f"{max_bytes / 1e6:.0f} MB."], [])
+    report = ValidationReport()
+    raw = _read_csv_bytes(content, "file", report)
+    if raw is None:
+        return SchoolUpload(empty, report.errors, [])
+    missing = SCHOOL_COLUMNS - set(raw.columns)
+    if missing:
+        return SchoolUpload(empty, [
+            f"Missing column(s): {', '.join(sorted(missing))}. The first row must be: "
+            "outcode,latitude,longitude,attendants (download the template)."], [])
+    if raw.empty:
+        return SchoolUpload(empty, ["The file has a header row but no schools."], [])
+    schools = validate_schools(raw, report)
+
+    errors = [e for e in report.errors if not e.startswith("No valid school rows")]
+    if report.excluded:
+        errors.insert(0, f"{len(report.excluded)} row(s) have invalid values. Fix them and upload again "
+                         "(no row was dropped): " + "; ".join(report.excluded))
+    warnings = [w for w in report.warnings if "excluded because of invalid data" not in w]
+    extra = sorted(set(raw.columns) - SCHOOL_COLUMNS)
+    if extra:
+        warnings.append(f"Extra column(s) ignored: {', '.join(extra)}.")
+    if not errors:
+        if int(schools["attendees"].sum()) == 0:
+            errors.append("Every school has zero attendants: there is nothing to plan.")
+        same_place = schools[schools.duplicated(["latitude", "longitude"], keep=False)]
+        if len(same_place):
+            groups = same_place.groupby(["latitude", "longitude"])["school_id"].apply(", ".join)
+            warnings.append("Schools with identical coordinates (check for duplicate records): "
+                            + "; ".join(groups.tolist()) + ".")
+        if len(schools) + 1 > OSRM_MAX_POINTS:
+            warnings.append(f"{len(schools)} schools plus the venue exceed the OSRM limit of {OSRM_MAX_POINTS} "
+                            "points per request, so the driving-time goal will use the labelled fixed-speed "
+                            "estimate instead of road times.")
+    return SchoolUpload(empty if errors else schools, errors, warnings)
+
+
+def parse_venue_csv(content: bytes) -> Event:
+    """One-row venue CSV (name, latitude, longitude) as a validated Event. Raises ValueError."""
+    report = ValidationReport()
+    raw = _read_csv_bytes(content or b"", "venue file", report)
+    if raw is None:
+        raise ValueError(" ".join(report.errors))
+    missing = VENUE_COLUMNS - set(raw.columns)
+    if missing:
+        raise ValueError(f"Venue file is missing column(s): {', '.join(sorted(missing))}. "
+                         "The first row must be: name,latitude,longitude")
+    if len(raw) != 1:
+        raise ValueError(f"Venue file must have exactly one venue row, found {len(raw)}.")
+    row = raw.iloc[0]
+    return make_event(*(None if pd.isna(row[c]) else row[c] for c in ("name", "latitude", "longitude")))
+
+
+def far_schools(schools: pd.DataFrame, event: Event, limit_miles: float = FAR_FROM_VENUE_MILES) -> list[str]:
+    """Schools more than ``limit_miles`` straight-line from the venue (often a coordinate typo)."""
+    return [row.school_id for row in schools.itertuples()
+            if haversine_miles(row.latitude, row.longitude, event.latitude, event.longitude) > limit_miles]

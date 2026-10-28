@@ -43,14 +43,86 @@ def savings(baseline: Solution, optimised: Solution) -> Savings:
     return Savings(baseline.total_cost, optimised.total_cost, len(baseline.routes), len(optimised.routes))
 
 
-def bus_table(solution: Solution) -> pd.DataFrame:
+@dataclass
+class ImpactMetrics:
+    """Impact figures for one validated plan and its baseline (same model, same inputs).
+
+    Only quantities the optimiser actually computes are included. Fuel,
+    carbon and planning time are not modelled, so they are not reported.
+    """
+
+    model: str
+    status_text: str
+    proven_optimal: bool
+    schools_served: int
+    attendees: int
+    baseline_cost: float
+    optimised_cost: float
+    baseline_buses: int
+    optimised_buses: int
+    baseline_utilisation: float
+    optimised_utilisation: float
+
+    @property
+    def saving(self) -> float:
+        return self.baseline_cost - self.optimised_cost
+
+    @property
+    def saving_percent(self) -> float | None:
+        """None when the baseline cost is zero."""
+        return None if self.baseline_cost == 0 else self.saving / self.baseline_cost * 100.0
+
+    @property
+    def cost_per_student_before(self) -> float | None:
+        """None when nobody travels."""
+        return None if self.attendees == 0 else self.baseline_cost / self.attendees
+
+    @property
+    def cost_per_student_after(self) -> float | None:
+        return None if self.attendees == 0 else self.optimised_cost / self.attendees
+
+    @property
+    def buses_removed(self) -> int:
+        return self.baseline_buses - self.optimised_buses
+
+
+def impact_metrics(baseline: Solution, optimised: Solution) -> ImpactMetrics:
+    """Impact figures; refuses invalid plans and mismatched baselines."""
+    if not optimised.has_plan:
+        raise ValueError("Impact figures need a validated plan.")
+    if not baseline.has_plan:
+        raise ValueError("The baseline plan is not valid.")
+    if baseline.model != optimised.model:
+        raise ValueError("The baseline must use the same cost model as the plan.")
+    if baseline.total_attendees != optimised.total_attendees:
+        raise ValueError(
+            f"Baseline carries {baseline.total_attendees} attendees but the plan carries "
+            f"{optimised.total_attendees}: they were built from different inputs."
+        )
+    return ImpactMetrics(
+        model=optimised.model,
+        status_text=optimised.status_text(),
+        proven_optimal=optimised.proven_optimal,
+        schools_served=sum(len(r.stops) for r in optimised.routes),
+        attendees=optimised.total_attendees,
+        baseline_cost=baseline.total_cost,
+        optimised_cost=optimised.total_cost,
+        baseline_buses=len(baseline.routes),
+        optimised_buses=len(optimised.routes),
+        baseline_utilisation=baseline.utilisation,
+        optimised_utilisation=optimised.utilisation,
+    )
+
+
+def bus_table(solution: Solution, end_label: str = "Stadium") -> pd.DataFrame:
+    """One row per bus. ``end_label`` names the destination at the end of each route."""
     unit = solution.metric_unit
     rows = []
     for r in solution.routes:
         rows.append({
             "Bus": r.bus_id,
             "Bus size": r.bus_size,
-            "Schools (pickup order)": " -> ".join(r.stops) + " -> Stadium",
+            "Schools (pickup order)": " -> ".join(r.stops) + f" -> {end_label}",
             "Schools": len(r.stops),
             "Attendees": r.attendees,
             "Empty seats": r.empty_seats,
@@ -138,6 +210,10 @@ def plan_csv(solution: Solution, dataset: Dataset) -> str:
     frame.insert(3, "Bus size", frame["Bus"].map(sizes))
     for col in ("Bus cost", "Cost share", "Cost per attendee"):
         frame[col] = frame[col].round(2)
+    e = dataset.event
+    frame["Destination"] = e.name
+    frame["Destination latitude"] = e.latitude
+    frame["Destination longitude"] = e.longitude
     return frame.to_csv(index=False)
 
 
@@ -147,24 +223,45 @@ def plan_report(
     dataset: Dataset,
     constraints: Constraints,
     overrides: list[str],
+    distance_lines: list[str] | None = None,
 ) -> str:
-    """Markdown report with assumptions, status, allocation, savings and shares."""
+    """Markdown report: summary, assumptions, status, results, distance, warnings,
+    Responsible AI notes, allocation and shares.
+
+    ``distance_lines``: optional Markdown bullets with bus-distance figures
+    (``explain.distance_lines``); kept as text so this module needs no matrices.
+    """
     if not solution.has_plan:
         raise ValueError("Only a validated plan can be exported.")
     s = savings(baseline, solution)
     pct = "n/a (baseline cost is zero)" if s.percent is None else f"{s.percent:.1f}%"
     model_rates = dataset.rates[solution.model]
+    status_meaning = ("optimality proven: no valid plan costs less under this pricing" if solution.proven_optimal
+                      else "valid plan, best found within the time limit; not proven to be the cheapest")
+    warnings = ["Costs are in the challenge's cost units, not a real currency or a quote."]
+    if solution.model != "fixed":
+        warnings.append("Route search is heuristic: a longer or repeated search may find a cheaper plan.")
+    if solution.model == "time" and str(solution.matrix_source).startswith(("APPROX", "ML")):
+        warnings.append(f"Travel times are estimates ({solution.matrix_source}), not road routing.")
+    warnings.append("Distances are straight-line (haversine) miles, not road mileage.")
     lines = [
         "# Campus Cruise transport plan",
         "",
         f"Generated {datetime.now():%Y-%m-%d %H:%M}. Costs are in {CURRENCY_LABEL} (the data does not state a currency).",
+        "",
+        "## Summary",
+        f"- {MODEL_LABELS[solution.model]}: {s.optimised_buses} shared buses cost {s.optimised_cost:,.2f}, against "
+        f"{s.baseline_buses} buses and {s.baseline_cost:,.2f} if every school rented its own bus: "
+        f"{s.absolute:,.2f} saved ({pct}).",
+        f"- Solver status: {solution.status_text()} ({status_meaning}).",
+        "- Independent validation: passed. No school is split and no bus is over capacity.",
         "",
         "## Inputs and assumptions",
         f"- Event: {dataset.event.name} ({dataset.event.latitude}, {dataset.event.longitude})",
         f"- Cost model: {MODEL_LABELS[solution.model]}",
         "- Bus rates: " + ", ".join(f"{k}-seat = {v:g}" for k, v in sorted(model_rates.items())),
         f"- Route data: {solution.matrix_source}" if solution.model != "fixed" else "- Route data: not used for cost (fixed model)",
-        "- A bus starts at its first pickup and ends at the stadium; no return trip; no dwell time.",
+        "- A bus starts at its first pickup and ends at the event venue; no return trip; no dwell time.",
         "- A school is never split between buses.",
         f"- Schools transported: {len({x for r in solution.routes for x in r.stops})}; attendees: {solution.total_attendees}",
         "- Attendance changes: " + ("; ".join(overrides) if overrides else "none"),
@@ -181,10 +278,20 @@ def plan_report(
         f"- Optimised cost: {s.optimised_cost:.2f} with {s.optimised_buses} buses",
         f"- Baseline (one bus per school): {s.baseline_cost:.2f} with {s.baseline_buses} buses",
         f"- Savings: {s.absolute:.2f} ({pct})",
-        f"- Seat utilisation: {solution.utilisation * 100:.1f}%",
+        f"- Seat utilisation: {solution.utilisation * 100:.1f}% (baseline {baseline.utilisation * 100:.1f}%)",
+        *(distance_lines or []),
+        "",
+        "## Approximations and warnings",
+        *[f"- {w}" for w in warnings],
+        "",
+        "## Responsible AI and privacy",
+        "- The plan comes from the OR-Tools optimiser and passed separate validation code. Any change an AI "
+        "assistant proposed was applied only after an organiser approved it.",
+        "- Data used: postcode outcodes, one coordinate per outcode and head counts. No names or student records.",
+        "- An organiser must review this plan and confirm it with schools and the bus company before booking.",
         "",
         "## Buses",
-        bus_table(solution).to_markdown(index=False),
+        bus_table(solution, dataset.event.short_name).to_markdown(index=False),
         "",
         "## School cost shares (estimate, proportional to attendees)",
         cost_shares(solution, dataset).round(2).to_markdown(index=False),

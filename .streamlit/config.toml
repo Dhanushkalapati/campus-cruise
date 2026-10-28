@@ -1,0 +1,15 @@
+# Project Streamlit settings.
+[browser]
+# Do not send anonymous usage statistics to Streamlit (on by default).
+gatherUsageStats = false
+
+[theme]
+# One light theme with the red brand accent, so the demo looks the same on every machine.
+base = "light"
+primaryColor = "#D6453D"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F5F6F8"
+textColor = "#1F2933"
+borderColor = "#E3E6EA"
+baseRadius = "0.6rem"
+showWidgetBorder = true

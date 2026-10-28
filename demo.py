@@ -3,7 +3,12 @@
 Shows, for each cost model: the optimised plan vs the one-bus-per-school
 baseline, then an attendance change and the re-optimised cost difference.
 
-    python demo.py [--time-limit 30] [--offline]
+    python demo.py [--time-limit SECONDS] [--offline]
+
+Without --time-limit each model uses its default (src/data.py
+DEFAULT_TIME_LIMITS: fixed 20 s, distance and time 300 s). Each model runs
+twice (original attendance, then the change), so the default run takes about
+20 minutes.
 
 Outputs CSV plans and Markdown reports to demo_output/.
 """
@@ -40,7 +45,8 @@ def show(title, result):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--time-limit", type=float, default=30.0)
+    parser.add_argument("--time-limit", type=float, default=None,
+                        help="seconds per solve; default: each model's DEFAULT_TIME_LIMITS value")
     parser.add_argument("--offline", action="store_true", help="skip OSRM; use the labelled estimate")
     args = parser.parse_args()
 

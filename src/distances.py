@@ -76,8 +76,26 @@ class RoutingServiceError(RuntimeError):
 
 
 def _cache_key(points: list[tuple[float, float]]) -> str:
+    """Hash of every point in order (schools, then the event), to 6 decimal places.
+
+    Any change to a school, the venue or the point order gives a new key, so a
+    matrix is never reused for other coordinates. The routing settings are
+    fixed (public OSRM ``driving`` profile, durations only) and separate caches
+    are used for the table and route services, so they need no key part.
+    """
     text = ";".join(f"{lat:.6f},{lon:.6f}" for lat, lon in points)
     return hashlib.sha256(text.encode()).hexdigest()[:16]
+
+
+def _same_points(stored: object, points: list[tuple[float, float]]) -> bool:
+    """True if a cache file's stored points are ``points`` (guards against a hash collision)."""
+    if stored is None:
+        return True  # older cache files hold no points; the full-length key still matches
+    try:
+        return len(stored) == len(points) and all(
+            f"{float(a):.6f},{float(c):.6f}" == f"{b:.6f},{d:.6f}" for (a, c), (b, d) in zip(stored, points))
+    except (TypeError, ValueError):
+        return False
 
 
 def _check_matrix(matrix: object, n: int) -> np.ndarray:
@@ -135,6 +153,8 @@ def road_time_matrix(
     if cache_file.exists():
         try:
             cached = json.loads(cache_file.read_text())
+            if not _same_points(cached.get("points"), points):
+                raise RoutingServiceError("cached points differ from the requested points")
             seconds = _check_matrix(cached["durations"], len(points))
             return TimeMatrix(seconds / 3600.0, SOURCE_OSRM_CACHE, [f"Loaded from {cache_file.name}."])
         except (OSError, ValueError, KeyError, RoutingServiceError) as exc:
