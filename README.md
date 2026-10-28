@@ -1,5 +1,8 @@
 # Campus Cruise — Where Travel Gets Smarter
 
+**Author:** Dhanush Kalapati (Cardiff University), with team members Samyaka Nadavala and
+Sathwika Orugonda. AI Pollination Student Competition 2026.
+
 Optimisation tool for **Technical Challenge 2: Travel Organizer**. Schools send students to an
 event at Principality Stadium, Cardiff. Campus Cruise decides which schools share which bus, and
 which bus size each one uses, so the total transport cost is as low as possible. A school is never
