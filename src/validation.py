@@ -88,7 +88,8 @@ def validate_schools(raw: pd.DataFrame | None, report: ValidationReport) -> pd.D
 
     keep = []
     for i in range(len(raw)):
-        label = ids.iloc[i] if pd.notna(ids.iloc[i]) and ids.iloc[i] else f"row {i + 2}"
+        # Row numbers match the file as opened in a spreadsheet (header = row 1).
+        label = f"row {i + 2} ({ids.iloc[i]})" if pd.notna(ids.iloc[i]) and ids.iloc[i] else f"row {i + 2}"
         problems = []
         if pd.isna(ids.iloc[i]) or not ids.iloc[i]:
             problems.append("missing outcode")

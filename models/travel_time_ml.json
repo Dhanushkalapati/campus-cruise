@@ -1,0 +1,83 @@
+{
+  "version": 1,
+  "created": "2026-10-24 20:21",
+  "intended_use": "Experimental approximation of OSRM road-time estimates for pickup points in this region when OSRM data is unavailable. Not a real journey-time predictor: no observed journeys exist.",
+  "training_data": {
+    "file": "osrm_1965645e223a1b27.json",
+    "sha256": "45c5929fe6bb775d",
+    "modified": "2026-10-18 21:36",
+    "source": "OSRM public demo server (router.project-osrm.org), table service, driving profile",
+    "points": 61,
+    "pairs": 3600,
+    "target": "OSRM estimated driving duration (not an observed journey time)"
+  },
+  "features": [
+    "miles",
+    "sqrt_miles",
+    "origin_miles_to_event",
+    "dest_miles_to_event",
+    "dest_is_event"
+  ],
+  "model": {
+    "type": "ridge regression (standardised features)",
+    "alpha": 1.0,
+    "name": "M2",
+    "description": "Ridge on all features",
+    "mean": [
+      20.076370355448574,
+      4.300998243000411,
+      21.489286495468168,
+      21.131131720543696,
+      0.016666666666666666
+    ],
+    "std": [
+      10.762159918438089,
+      1.2560989089860533,
+      10.366593423937005,
+      10.641586846997853,
+      0.12801909579781015
+    ],
+    "coef": [
+      -0.004997737028506251,
+      0.26390163294510527,
+      0.003916674631286969,
+      0.0060861882797776275,
+      -0.0075525267709756275
+    ],
+    "intercept": 0.7855425385802468
+  },
+  "evaluation": {
+    "method": "5-fold cross-validation grouped by school (seed 42); held-out schools appear in no training pair",
+    "metrics": {
+      "B": {
+        "mae_min": 10.335865186508487,
+        "rmse_min": 14.435754638924806,
+        "mape_pct": 22.544511365422846,
+        "n": 3600
+      },
+      "M1": {
+        "mae_min": 7.627987185231435,
+        "rmse_min": 11.492899599950821,
+        "mape_pct": 19.5986925407215,
+        "n": 3600
+      },
+      "M2": {
+        "mae_min": 7.254259186802531,
+        "rmse_min": 11.171313511186987,
+        "mape_pct": 17.03863731401343,
+        "n": 3600
+      }
+    },
+    "candidates": {
+      "B": "Fixed-speed fallback (existing formula, not fitted)",
+      "M1": "Calibrated speed: ridge on straight-line miles",
+      "M2": "Ridge on all features"
+    },
+    "beats_fallback": true
+  },
+  "limitations": [
+    "Target is OSRM's estimate, not observed travel: no traffic, time of day, weather or dwell time.",
+    "Trained on 60 pickup points in South Wales and one destination; outside this region it is untested.",
+    "Grouped CV estimates error for new points in the same region only."
+  ]
+}

@@ -24,7 +24,7 @@ def metrics(at):
 def start(model="distance"):
     at = AppTest.from_file(APP, default_timeout=180)
     at.run()
-    at.sidebar.radio[0].set_value(model)
+    at.sidebar.radio[0].set_value(model).run()  # the model's own slider appears after this run
     at.sidebar.slider[0].set_value(5)
     return at.run()
 
@@ -70,11 +70,14 @@ def test_attendance_edit_flow_end_to_end():
     assert at.session_state["current"]["result"] is cur["result"]
     assert any("Not optimised. Invalid attendance" in e.value for e in at.error)
 
-    # Reset restores the source attendance (applied on the next run).
+    # Reset restores the source attendance. Those inputs were optimised before,
+    # so the stored plan is reused at once: no solver run, no stale warning.
+    runs = at.session_state["solver_runs"]
     at.button(key="reset_attendance").click().run()
     assert at.session_state["overrides"] == {} and at.session_state["attendance_errors"] == []
-    assert any("attendance" in w.value for w in at.warning)  # last plan still has NP11 = 15
-    run_optimiser(at)
+    assert at.session_state["solver_runs"] == runs
+    assert at.session_state["current"] is first
+    assert not any("do not include your changes" in w.value for w in at.warning)
     assert metrics(at)["Attendees"] == "1244"
 
 
@@ -92,8 +95,16 @@ def test_infeasible_edit_never_shows_old_plan_as_new():
 
 def test_model_switch_runs_selected_model():
     at = run_optimiser(start("distance"))
+    # The fixed model re-optimises automatically (exact, a few seconds).
     at.sidebar.radio[0].set_value("fixed").run()
-    assert any("cost model" in w.value for w in at.warning)
+    cur = at.session_state["current"]
+    assert cur["model"] == "fixed" and cur["trigger"] == "auto"
+    assert cur["result"].solution.time_limit_s == 20  # each model has its own slider and default
+    assert not any("do not include your changes" in w.value for w in at.warning)
+    # A new time limit is a setting: flagged, but not run automatically.
+    at.sidebar.slider[0].set_value(5).run()
+    assert at.session_state["current"] is cur
+    assert any("used a 20 s limit" in i.value for i in at.sidebar.info)
     run_optimiser(at)
     cur = at.session_state["current"]
     assert cur["model"] == "fixed"
@@ -103,7 +114,7 @@ def test_model_switch_runs_selected_model():
 
 def test_time_model_labels_its_travel_time_source():
     at = start("time")
-    at.sidebar.checkbox[0].uncheck().run()  # no network request
+    at.sidebar.checkbox(key="allow_online").uncheck().run()  # no network request
     run_optimiser(at)
     cur = at.session_state["current"]
     sol = cur["result"].solution

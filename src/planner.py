@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .data import Dataset
+from .data import DEFAULT_TIME_LIMITS, Dataset
 from .distances import SOURCE_APPROX, TimeMatrix, road_time_matrix, straight_line_matrix
 from .model import INFEASIBLE, Constraints, Solution
 from .solvers import event_points, solve_baseline, solve_fixed, solve_routing
@@ -31,12 +31,13 @@ def optimise(
     dataset: Dataset,
     model: str,
     constraints: Constraints | None = None,
-    time_limit: float = 30.0,
+    time_limit: float | None = None,
     time_matrix: TimeMatrix | None = None,
     warm_start: Solution | None = None,
 ) -> PlanResult:
     """Solve one cost model. ``time_matrix`` is required for the time model.
 
+    ``time_limit``: seconds; ``None`` uses ``DEFAULT_TIME_LIMITS[model]``.
     ``warm_start``: a previous valid plan to start the search from. It is
     repaired for the current attendance and constraints before use.
     """
@@ -44,6 +45,10 @@ def optimise(
     constraints = constraints or Constraints()
     if model not in dataset.available_models:
         raise ValueError(f"Cost model '{model}' is not available in the supplied data.")
+    if time_limit is None:
+        time_limit = DEFAULT_TIME_LIMITS[model]
+    if time_limit <= 0:
+        raise ValueError("The time limit must be positive.")
     rates = dataset.rates[model]
     miles = straight_line_matrix(points_of(dataset))
 
@@ -69,6 +74,9 @@ def optimise(
                         metric_unit="hours", matrix_source=time_matrix.source, warm_start=start)
     if time_matrix.source == SOURCE_APPROX:
         sol.notes.append("Travel times are an offline approximation, not real road routing.")
+    elif time_matrix.source.startswith("ML"):
+        sol.notes.append("Travel times are an experimental ML estimate of OSRM road times, not road routing "
+                         "and not observed journeys.")
     base = solve_baseline(dataset.schools, rates, model, hours, "hours")
     base.matrix_source = time_matrix.source
     return PlanResult(sol, base, hours)

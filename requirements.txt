@@ -9,3 +9,6 @@ folium==0.20.0
 streamlit-folium==0.27.4
 tabulate==0.10.0
 pytest==9.1.1
+# Optional: only the AI Assistant tab needs these, plus an OPENAI_API_KEY or ANTHROPIC_API_KEY.
+openai==3.37.0
+anthropic==2.3.0

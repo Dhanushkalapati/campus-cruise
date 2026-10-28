@@ -5,3 +5,4 @@ __pycache__/
 .streamlit/secrets.toml
 data/cache/
 demo_output/
+node_modules/
