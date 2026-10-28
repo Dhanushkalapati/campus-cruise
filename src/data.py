@@ -15,6 +15,7 @@ hours. The data does not state a currency, so costs are shown as "cost units".
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -74,15 +75,19 @@ class Dataset:
         return sorted(self.rates.get(model, {}))
 
     def with_attendance(self, overrides: dict[str, int]) -> "Dataset":
-        """Return a copy with edited attendance. The original is not changed."""
+        """Return a copy with edited attendance. The original is not changed.
+
+        Every value must be a whole number >= 0 (0 means the school needs no bus).
+        """
         schools = self.schools.copy()
         known = set(schools["school_id"])
         for school_id, value in overrides.items():
             if school_id not in known:
                 raise ValueError(f"Unknown school {school_id!r}.")
-            if int(value) != value or value < 0:
+            count = whole_attendance(value)
+            if count is None:
                 raise ValueError(f"Attendance for {school_id} must be a whole number >= 0, got {value!r}.")
-            schools.loc[schools["school_id"] == school_id, "attendees"] = int(value)
+            schools.loc[schools["school_id"] == school_id, "attendees"] = count
         report = ValidationReport(
             errors=list(self.report.errors),
             warnings=list(self.report.warnings),
@@ -91,6 +96,55 @@ class Dataset:
         for model, rates in self.rates.items():
             report.check_capacity(schools, model, rates)
         return Dataset(schools=schools, rates=self.rates, event=self.event, report=report)
+
+
+def whole_attendance(value: object) -> int | None:
+    """``value`` as a whole number >= 0, or None if it is not one.
+
+    Rejects missing values, text, booleans, decimals (15.5) and negatives.
+    A float with no fractional part (15.0) is accepted as 15.
+    """
+    if value is None or isinstance(value, (bool, str)):
+        return None  # typed text is not accepted, even "15"
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number) or number < 0 or number != int(number):
+        return None
+    return int(number)
+
+
+def attendance_edits(
+    edited_rows: dict, school_ids: list[str], originals: list[int], column: str = "Attendees"
+) -> tuple[dict[str, int], list[str]]:
+    """Turn ``st.data_editor`` edits into attendance overrides.
+
+    ``edited_rows`` is the editor's ``{row position: {column: value}}`` state.
+    Returns ``(overrides, errors)``. Overrides hold only values that differ
+    from the original; errors describe values that were rejected. A rejected
+    value never becomes an override, so the optimiser cannot run on it.
+    """
+    overrides: dict[str, int] = {}
+    errors: list[str] = []
+    for position, change in sorted(edited_rows.items(), key=lambda kv: int(kv[0])):
+        if column not in change:
+            continue
+        k = int(position)
+        if not 0 <= k < len(school_ids):
+            errors.append(f"Edited row {k} does not match any school.")
+            continue
+        school, value = school_ids[k], change[column]
+        if value is None or (isinstance(value, float) and math.isnan(value)):
+            errors.append(f"{school}: attendance is empty. Enter a whole number (0 = no bus needed).")
+            continue
+        count = whole_attendance(value)
+        if count is None:
+            errors.append(f"{school}: {value!r} is not a whole number >= 0.")
+            continue
+        if count != int(originals[k]):
+            overrides[school] = count
+    return overrides, errors
 
 
 def _read_csv(path: Path, report: ValidationReport) -> pd.DataFrame | None:
