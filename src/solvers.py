@@ -44,6 +44,7 @@ from .validation import route_metric, validate_solution
 COST_SCALE = 100  # CP-SAT works in integers: costs in hundredths
 ROUTING_SCALE = 1000  # routing arc costs in thousandths of a cost unit
 SEED = 42
+MIN_STAGE2_S = 0.5  # skip the fixed model's tie-break stage if less time than this is left
 
 
 # --------------------------------------------------------------------------- #
@@ -387,7 +388,9 @@ def solve_fixed(
                 self.hit = True
                 self.StopSearch()
 
-    stage1_limit = max(1.0, time_limit * (0.7 if prefer_nearby else 1.0))
+    # Stage 1 (cost) gets 70% of the budget when a tie-break stage follows.
+    # It stops early when it proves optimality, leaving more time for stage 2.
+    stage1_limit = min(time_limit, max(1.0, time_limit * (0.7 if prefer_nearby else 1.0)))
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = stage1_limit
     solver.parameters.num_search_workers = 8
@@ -437,9 +440,13 @@ def solve_fixed(
     assignment = {i: next(j for j in range(i + 1) if solver.Value(x[i, j])) for i in range(n)}
     types = {j: t for (j, t), var in z.items() if solver.Value(var)}
 
-    if prefer_nearby and n > 1:
+    remaining = time_limit - (time.perf_counter() - start)
+    if prefer_nearby and n > 1 and remaining < MIN_STAGE2_S:
+        sol.notes.append("Tie-break stage skipped: the time limit was used up by the cost stage.")
+    elif prefer_nearby and n > 1:
         # Stage 2: keep cost <= stage-1 cost, minimise the miles between each
         # school and its bus leader, so shared buses group nearby schools.
+        # It only uses what is left of the time limit.
         m.Add(cost_expr <= best_cost)
         spread = sum(
             int(round(miles[full_index[ids[i]], full_index[ids[j]]] * 100)) * x[i, j]
@@ -450,7 +457,7 @@ def solve_fixed(
         for (i, j), var in x.items():
             m.AddHint(var, assignment[i] == j)
         solver2 = cp_model.CpSolver()
-        solver2.parameters.max_time_in_seconds = max(1.0, time_limit - (time.perf_counter() - start))
+        solver2.parameters.max_time_in_seconds = remaining
         solver2.parameters.num_search_workers = 8
         solver2.parameters.random_seed = SEED
         status2 = solver2.Solve(m)

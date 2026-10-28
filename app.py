@@ -11,8 +11,8 @@ import math
 import pandas as pd
 import streamlit as st
 
-from src.data import COST_MODELS, CURRENCY_LABEL, MODEL_LABELS, load_dataset
-from src.distances import RoutingServiceError, road_path
+from src.data import COST_MODELS, CURRENCY_LABEL, MODEL_LABELS, attendance_edits, load_dataset
+from src.distances import SOURCE_APPROX, RoutingServiceError, TimeMatrix, approximate_time_matrix, road_path
 from src.model import Constraints
 from src.planner import optimise, time_matrix_for
 from src.report import (
@@ -70,8 +70,19 @@ def get_dataset():
 
 
 @st.cache_data(show_spinner="Fetching travel-time matrix...")
-def get_time_matrix(points_key: tuple, allow_online: bool):
-    return time_matrix_for(get_dataset(), allow_online=allow_online, allow_approximate=True)
+def get_road_matrix(points_key: tuple, allow_online: bool) -> TimeMatrix:
+    """Road times only (disk cache or OSRM). Failures raise and are not cached,
+    so a later run retries OSRM instead of reusing a stored fallback."""
+    return time_matrix_for(get_dataset(), allow_online=allow_online, allow_approximate=False)
+
+
+def get_time_matrix(points_key: tuple, allow_online: bool) -> TimeMatrix:
+    try:
+        return get_road_matrix(points_key, allow_online)
+    except RoutingServiceError as exc:
+        points = [tuple(p) for p in points_key] + [(dataset.event.latitude, dataset.event.longitude)]
+        return TimeMatrix(approximate_time_matrix(points), SOURCE_APPROX,
+                          [str(exc), "Using the offline estimate. Travel times are approximate, not road routing."])
 
 
 def init_state():
@@ -79,9 +90,47 @@ def init_state():
     ss.setdefault("must_share", [])
     ss.setdefault("cannot_share", [])
     ss.setdefault("solo", [])
-    ss.setdefault("overrides", {})
+    ss.setdefault("overrides", {})         # school -> edited attendance (valid values only)
+    ss.setdefault("attendance_errors", [])  # rejected edits; block the optimiser
     ss.setdefault("current", None)   # dict: result, model, overrides, constraints, dataset
     ss.setdefault("previous", None)
+
+
+# Widget callbacks. Streamlit runs callbacks before the script body, so every
+# edit is in session state before the "Run optimiser" block reads it, even
+# when the edit and the button click arrive in the same rerun.
+
+
+def sync_attendance():
+    ss = st.session_state
+    state = ss.get("att_editor") or {}
+    ss.overrides, ss.attendance_errors = attendance_edits(
+        state.get("edited_rows", {}), school_ids, dataset.schools["attendees"].tolist(), "Attendees")
+
+
+def reset_attendance():
+    ss = st.session_state
+    ss.overrides, ss.attendance_errors = {}, []
+    ss.pop("att_editor", None)
+
+
+def sync_solo():
+    st.session_state.solo = list(st.session_state.solo_select)
+
+
+def add_pair(key: str):
+    ss = st.session_state
+    a, b = ss[f"{key}_a"], ss[f"{key}_b"]
+    pair = tuple(sorted((a, b)))
+    if a == b:
+        ss[f"{key}_msg"] = "Pick two different schools."
+    elif pair not in ss[key]:
+        ss[key].append(pair)
+
+
+def remove_pair(key: str, pair: tuple):
+    if pair in st.session_state[key]:
+        st.session_state[key].remove(pair)
 
 
 def current_constraints() -> Constraints:
@@ -125,8 +174,9 @@ with st.sidebar:
     if model == "time":
         allow_online = st.checkbox(
             "Use real road times from OSRM (online)", value=True,
-            help="Public OSRM table service. Results are cached locally. "
-                 "If unchecked or unreachable, an approximate offline estimate is used and labelled.",
+            help="Public OSRM table service. Results are cached locally. If unchecked, no network "
+                 "request is made: cached road times are used if present. If no road times are "
+                 "available, an approximate offline estimate is used and labelled.",
         )
 
     pending = []
@@ -147,9 +197,11 @@ with st.sidebar:
                  "constraints) and the search starts from it. Routing then only improves on it, "
                  "so results change only where your edits require it.",
         )
-    run = st.button("Run optimiser", type="primary", width="stretch")
+    run = st.button("Run optimiser", type="primary", width="stretch", key="run_optimiser")
     if ss.current is not None and pending:
         st.info("Not applied yet: " + ", ".join(pending) + ". Run the optimiser to apply.")
+    if ss.attendance_errors:
+        st.error("Fix the attendance errors in **Adjust plan** before running.")
     st.caption(f"Costs are in {CURRENCY_LABEL}: the supplied data does not state a currency.")
 
 # --------------------------------------------------------------------------- #
@@ -157,20 +209,21 @@ with st.sidebar:
 # --------------------------------------------------------------------------- #
 
 if run:
-    try:
-        working = dataset.with_attendance(ss.overrides)
-    except ValueError as exc:
-        st.error(f"Attendance edit rejected: {exc}")
-        working = None
+    working = None
+    if ss.attendance_errors:
+        st.error("Not optimised. Invalid attendance: " + " ".join(ss.attendance_errors)
+                 + " The results below are from the last successful run.")
+    else:
+        try:
+            working = dataset.with_attendance(ss.overrides)
+        except ValueError as exc:
+            st.error(f"Attendance edit rejected: {exc}")
     if working is not None:
         tm = None
         if model == "time":
             # Coordinates do not change with attendance, so one matrix serves every run.
-            pts =tuple(map(tuple, dataset.schools[["latitude", "longitude"]].to_numpy().round(6)))
-            try:
-                tm = get_time_matrix(pts, allow_online)
-            except RoutingServiceError as exc:
-                st.error(f"No travel-time data: {exc}")
+            pts = tuple(map(tuple, dataset.schools[["latitude", "longitude"]].to_numpy().round(6)))
+            tm = get_time_matrix(pts, allow_online)  # never fails: falls back to the labelled estimate
         if model != "time" or tm is not None:
             with st.spinner(f"Optimising ({MODEL_LABELS[model]}, up to {time_limit} s)..."):
                 start = ss.current["result"].solution if warm else None
@@ -185,6 +238,11 @@ if run:
             st.rerun()
 
 cur = ss.current
+if cur is not None and [p for p in pending if p != "no plan yet"]:
+    st.warning(
+        "The results below come from the last run. They do not include your changes to: "
+        + ", ".join(pending) + ". Press **Run optimiser** to apply them."
+    )
 tabs = st.tabs(["Overview", "Plan & map", "Adjust plan", "Compare", "Data & validation", "Export"])
 
 # --------------------------------------------------------------------------- #
@@ -196,7 +254,10 @@ with tabs[0]:
         st.info("Choose a cost model in the sidebar and press **Run optimiser**.")
         c1, c2, c3 = st.columns(3)
         c1.metric("Schools", len(dataset.schools))
-        c2.metric("Attendees", int(dataset.schools["attendees"].sum()))
+        source_total = int(dataset.schools["attendees"].sum())
+        edited_total = int(dataset.with_attendance(ss.overrides).schools["attendees"].sum())
+        c2.metric("Attendees (with your edits)" if ss.overrides else "Attendees", edited_total,
+                  f"{edited_total - source_total:+d} vs source data" if ss.overrides else None)
         c3.metric("Bus sizes", ", ".join(str(s) for s in dataset.bus_sizes(models[0])))
     else:
         res = cur["result"]
@@ -384,27 +445,24 @@ with tabs[2]:
     col_a, col_c = st.columns([2, 3])
     with col_a:
         st.subheader("Attendance")
+        st.caption("Whole numbers only. 0 means the school needs no bus.")
         base_table = dataset.schools[["school_id", "attendees"]].copy()
         base_table["edited"] = base_table["attendees"]  # edits live in the editor's own state
-        edited = st.data_editor(
+        st.data_editor(
             base_table.rename(columns={"school_id": "School", "attendees": "Original", "edited": "Attendees"}),
-            hide_index=True, width="stretch", height=380, key="att_editor",
+            hide_index=True, width="stretch", height=380, key="att_editor", on_change=sync_attendance,
             disabled=["School", "Original"],
             column_config={"Attendees": st.column_config.NumberColumn(min_value=0, max_value=500, step=1)},
         )
-        new_overrides = {
-            r.School: int(r.Attendees) for r in edited.itertuples()
-            if pd.notna(r.Attendees) and int(r.Attendees) != int(r.Original)
-        }
-        if new_overrides != ss.overrides:
-            ss.overrides = new_overrides
-            st.rerun()
+        for msg in ss.attendance_errors:
+            st.error(msg)
         if ss.overrides:
+            source_total = int(dataset.schools["attendees"].sum())
+            new_total = int(dataset.with_attendance(ss.overrides).schools["attendees"].sum())
             st.write("Edited: " + ", ".join(f"{k} → {v}" for k, v in ss.overrides.items()))
-            if st.button("Reset attendance"):
-                ss.overrides = {}
-                ss.pop("att_editor", None)
-                st.rerun()
+            st.write(f"Total attendees: {source_total} in the source data → {new_total} with your edits.")
+        if ss.overrides or ss.attendance_errors:
+            st.button("Reset attendance to source data", key="reset_attendance", on_click=reset_attendance)
 
     with col_c:
         st.subheader("Sharing constraints")
@@ -412,30 +470,22 @@ with tabs[2]:
         def pair_editor(label: str, key: str, help_text: str):
             st.markdown(f"**{label}**")
             c1, c2, c3 = st.columns([2, 2, 1])
-            a = c1.selectbox("School", school_ids, key=f"{key}_a", label_visibility="collapsed")
-            b = c2.selectbox("School", school_ids, index=1, key=f"{key}_b", label_visibility="collapsed")
-            if c3.button("Add", key=f"{key}_add", help=help_text):
-                pair = tuple(sorted((a, b)))
-                if a == b:
-                    st.warning("Pick two different schools.")
-                elif pair not in ss[key]:
-                    ss[key].append(pair)
-                    st.rerun()
-            for i, (x, y) in enumerate(list(ss[key])):
+            c1.selectbox("School", school_ids, key=f"{key}_a", label_visibility="collapsed")
+            c2.selectbox("School", school_ids, index=1, key=f"{key}_b", label_visibility="collapsed")
+            c3.button("Add", key=f"{key}_add", help=help_text, on_click=add_pair, args=(key,))
+            if ss.pop(f"{key}_msg", None):
+                st.warning("Pick two different schools.")
+            for x, y in list(ss[key]):
                 r1, r2 = st.columns([4, 1])
                 r1.write(f"{x} & {y}")
-                if r2.button("Remove", key=f"{key}_rm_{i}"):
-                    ss[key].pop(i)
-                    st.rerun()
+                r2.button("Remove", key=f"{key}_rm_{x}_{y}", on_click=remove_pair, args=(key, (x, y)))
 
         pair_editor("Must share a bus", "must_share", "Both schools ride the same bus.")
         pair_editor("Must NOT share a bus", "cannot_share", "The two schools ride different buses.")
         st.markdown("**Own bus (no sharing)**")
-        solo = st.multiselect("Schools that travel alone", school_ids, default=ss.solo,
-                              label_visibility="collapsed")
-        if solo != ss.solo:
-            ss.solo = solo
-            st.rerun()
+        ss.setdefault("solo_select", list(ss.solo))
+        st.multiselect("Schools that travel alone", school_ids, key="solo_select", on_change=sync_solo,
+                       label_visibility="collapsed")
         st.caption("Constraints are hard rules. If they conflict with each other or with bus capacity, "
                    "the optimiser reports why instead of ignoring them.")
 
@@ -451,13 +501,15 @@ with tabs[3]:
     else:
         a_sol, b_sol = prev["result"].solution, cur["result"].solution
         same_model = prev["model"] == cur["model"]
-        st.markdown(f"**Previous:** {MODEL_LABELS[prev['model']]} &nbsp;→&nbsp; **Current:** {MODEL_LABELS[cur['model']]}")
+        st.markdown(f"**Previous valid plan:** {MODEL_LABELS[prev['model']]} &nbsp;→&nbsp; "
+                    f"**Revised plan (latest run):** {MODEL_LABELS[cur['model']]}")
+        st.caption("This compares two optimised plans. The one-bus-per-school baseline is on the Overview tab.")
         if not same_model:
             st.warning("Different cost models: costs are not directly comparable (the challenge notes this too).")
         c = st.columns(4)
         diff = b_sol.total_cost - a_sol.total_cost
-        c[0].metric("Previous cost", money(a_sol.total_cost))
-        c[1].metric("Current cost", money(b_sol.total_cost), f"{diff:+,.2f}", delta_color="inverse")
+        c[0].metric("Previous plan cost", money(a_sol.total_cost))
+        c[1].metric("Revised plan cost", money(b_sol.total_cost), f"{diff:+,.2f}", delta_color="inverse")
         c[2].metric("Buses", len(b_sol.routes), f"{len(b_sol.routes) - len(a_sol.routes):+d}", delta_color="inverse")
         pct = (diff / a_sol.total_cost * 100) if a_sol.total_cost else 0.0
         c[3].metric("Cost change", f"{pct:+.1f}%")
@@ -492,10 +544,11 @@ with tabs[3]:
 
 with tabs[4]:
     rep = dataset.report
+    st.caption("Source data as loaded from the CSV files. Attendance edits from **Adjust plan** are not shown here.")
     c = st.columns(4)
     c[0].metric("Schools", len(dataset.schools))
-    c[1].metric("Attendees", int(dataset.schools["attendees"].sum()))
-    c[2].metric("Largest school", int(dataset.schools["attendees"].max()) if len(dataset.schools) else 0)
+    c[1].metric("Attendees (source data)", int(dataset.schools["attendees"].sum()))
+    c[2].metric("Largest school (source data)", int(dataset.schools["attendees"].max()) if len(dataset.schools) else 0)
     c[3].metric("Cost models available", len(dataset.available_models))
     for e in rep.errors:
         st.error(e)

@@ -204,7 +204,7 @@ Linux/macOS: `python3 -m venv .venv && source .venv/bin/activate && pip install 
 streamlit run app.py          # dashboard at http://localhost:8501
 python demo.py                # CLI demo: all models, attendance change, re-optimisation
 python demo.py --offline      # demo without OSRM (labelled estimate for the time model)
-python -m pytest -q           # 104 tests
+python -m pytest -q           # 137 tests
 ```
 
 `demo.py` writes CSV plans and Markdown reports to `demo_output/`.
@@ -225,7 +225,11 @@ python -m pytest -q           # 104 tests
    - The legend lists every bus.
    - The tab also has the bus table and the school cost-share table.
 4. **Adjust plan.**
-   - Edit attendance.
+   - Edit attendance. Values must be whole numbers ≥ 0; 0 means the school needs no bus. An empty
+     cell, a decimal or a negative value is shown as an error, and the optimiser will not run
+     until it is fixed or reset.
+   - Edits reach the optimiser even if you click **Run optimiser** straight after typing.
+   - Until you rerun, a banner says that the results shown do not include your edits.
    - Add "must share", "must not share" and "own bus" constraints.
    - The sidebar shows which changes are not applied yet. Nothing changes until you rerun.
 5. **Compare.** Shows the previous and current valid plans: cost difference, input changes and
@@ -252,7 +256,8 @@ src/solvers.py       CP-SAT fixed model, OR-Tools routing, baseline, constraint 
 src/planner.py       one entry point: matrices -> solve -> baseline
 src/report.py        savings, cost shares, plan comparison, CSV/Markdown export
 src/model.py         Solution, BusRoute, Constraints types
-tests/               pytest suite, including warm start and road paths (synthetic data is labelled as such)
+tests/               pytest suite, including warm start, road paths, attendance re-optimisation and a
+                     headless dashboard flow (AppTest); synthetic data is labelled as such
 ```
 
 Tests cover these areas:
