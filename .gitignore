@@ -3,6 +3,9 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .streamlit/secrets.toml
-data/cache/
+# Caches are local, except the bundled OSRM road-time matrix for the default schools,
+# so a fresh deployment has road times without calling OSRM.
+data/cache/*
+!data/cache/osrm_1965645e223a1b27.json
 demo_output/
 node_modules/
