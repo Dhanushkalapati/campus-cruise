@@ -1,0 +1,12 @@
+The data for Challenge 2 includes the following:
+- `attendants_dataset.csv`: A CSV file containing outcodes, coordinates, and number of attendants.
+	- The outcodes provided are the first half of a UK postcode. They indicate the different places from which attendants need to be picked up.
+	- The coordinates provided are somewhere within the provided outcode. They are provided as latitude and longitude. These may not be situated exactly on a road. If you are considering travel time to calculate cost, you may assume the bus will depart from any street that is reasonably close to the provided coordinates.
+	- The number of attendants marks the number of people that need to be picked up from the given location. These may not be split up into different buses, as there may only be a single adult supervising the group.
+- `fixed_costs.csv`: A CSV file providing the costs of buses of different sizes. For this method, you may assume rental costs are fixed and do not depend on journey distance or time.
+- `direct_distance_costs.csv`: A CSV file providing the costs of buses based on distance as the crow flies and bus size. For this method, you need to find out the straight line distance between the points that each bus stops at in miles and multiply it by the cost. You may assume each bus starts at the first location it picks up someone from and ends at the location of the event, possibly going by other locations in the process.
+- `time_costs.csv`: A CSV file providing the costs of buses per hour based on bus size. Similar to the distance problem. However, instead of relying on straight line distance, you will need to take travel time into account instead.
+
+***Note:** You are NOT required to implement an approach for all three cost calculations. They are intended as increasing levels of challenge, but you are allowed to skip earlier levels and/or submit an approach that does not tackle the later levels. While total price for different cost calculations should be in the same order of magnitude, they are not intended to be compared to each other.*
+
+The fictional event for this challenge is being held at the Principality Stadium in Cardiff, at the following address: *Westgate St, Cardiff CF10 1NS*. You can use coordinates 51.478283, -3.182652 as the location of the event. You may assume buses are able to park on location.
