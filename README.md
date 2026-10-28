@@ -484,7 +484,7 @@ presentation.
 
 - **Claude Code (Anthropic; Claude Opus models)** was used to write and refactor code, write tests,
   audit the project against the brief, and draft documentation (this README,
-  `PROJECT_TECHNICAL_REPORT.md`, `docs/pitch.md`). The team reviewed, ran and tested the output.
+  `PROJECT_TECHNICAL_REPORT.md`, the pitch deck). The team reviewed, ran and tested the output.
 - **TEAM TO CONFIRM:** list any other tools used (for example for the EOI, slides or images) and how.
 
 Separately, the app itself can call a language model (OpenAI or Anthropic) at run time; that is a
@@ -684,7 +684,8 @@ src/mapview.py       map filters and per-bus details (map and table share the sa
 src/ml_travel_time.py  data-readiness audit, OSRM-approximating ridge model, grouped CV, safe loading
 models/              trained ML artefact (JSON, no pickled code)
 PROJECT_TECHNICAL_REPORT.md  full technical analysis for judges
-docs/pitch.md        7-minute pitch: slides, speaker script, demo checklist, backup plan
+presentation/        pitch deck (ai project.pptx, speaker notes inside) and its backup copy;
+                     build/build_ai_project.js rebuilds it
 .streamlit/          Streamlit settings (usage statistics off)
 src/data.py          loading, Dataset, attendance overrides
 src/validation.py    input validation and independent solution checks

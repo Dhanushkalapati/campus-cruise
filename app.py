@@ -240,10 +240,16 @@ def points_key() -> tuple:
     return tuple((float(a), float(b)) for a, b in points_of(dataset))
 
 
+def same_venue(a: Event, b: Event) -> bool:
+    """Compare venues by value. Not ``a == b``: after Streamlit reloads ``src.data`` the
+    stored and the new ``Event`` are different classes and never compare equal."""
+    return (a.name, a.latitude, a.longitude) == (b.name, b.latitude, b.longitude)
+
+
 def custom_inputs() -> bool:
     """True when the school data or the venue differs from the bundled defaults."""
     ss = st.session_state
-    return ss.get("school_source") is not None or ss.get("venue", DEFAULT_EVENT) != DEFAULT_EVENT
+    return ss.get("school_source") is not None or not same_venue(ss.get("venue", DEFAULT_EVENT), DEFAULT_EVENT)
 
 
 def display_hours() -> tuple:
@@ -358,7 +364,7 @@ def set_venue(event: Event):
     ss = st.session_state
     ss.venue_errors = []
     ss.venue_name, ss.venue_lat, ss.venue_lon = event.name, f"{event.latitude:.6f}", f"{event.longitude:.6f}"
-    if event != ss.venue:
+    if not same_venue(event, ss.venue):
         ss.venue = event
         reset_plan_state()
         ss.inputs_msg = (f"Destination set to {event.short_name} ({event.latitude:.6f}, {event.longitude:.6f}). "
@@ -668,7 +674,7 @@ with st.sidebar:
         st.markdown(f"**In use:** {venue.name}  \n{venue.latitude:.6f}, {venue.longitude:.6f}")
         st.map(pd.DataFrame({"lat": [venue.latitude], "lon": [venue.longitude]}), zoom=12, height=170,
                size=60, color="#D6453D")
-        if venue != DEFAULT_EVENT:
+        if not same_venue(venue, DEFAULT_EVENT):
             st.button("Reset to Principality Stadium", on_click=reset_venue, icon=":material/restart_alt:",
                       width="stretch")
         with st.popover("Enter coordinates by hand", width="stretch", icon=":material/edit_location_alt:"):
@@ -2200,7 +2206,7 @@ with tabs[6]:
         st.dataframe(bus_df, hide_index=True, width="stretch")
         section("Event")
         st.markdown(f"{dataset.event.name}  \n{dataset.event.latitude}, {dataset.event.longitude} "
-                    + ("(from the challenge data README)" if dataset.event == DEFAULT_EVENT
+                    + ("(from the challenge data README)" if same_venue(dataset.event, DEFAULT_EVENT)
                        else "(set in the sidebar, **Destination**)"))
 
     with st.expander("Assumptions and limitations", icon=":material/list:"):
