@@ -11,7 +11,7 @@ import math
 import pandas as pd
 import streamlit as st
 
-from src.data import COST_MODELS, CURRENCY_LABEL, MODEL_LABELS, MODEL_UNITS, load_dataset
+from src.data import COST_MODELS, CURRENCY_LABEL, MODEL_LABELS, load_dataset
 from src.distances import RoutingServiceError, road_path
 from src.model import Constraints
 from src.planner import optimise, time_matrix_for
@@ -38,8 +38,7 @@ st.set_page_config(page_title="Campus Cruise", page_icon="🚌", layout="wide")
 st.markdown(
     """
     <style>
-      .block-container { padding-top: 1.6rem; max-width: 1400px; }
-      .cc-title { font-size: 2rem; font-weight: 700; margin-bottom: 0; }
+      .block-container { padding-top: 3.5rem; max-width: 1400px; }
       .cc-sub { color: #5b6573; margin-top: .1rem; margin-bottom: 1rem; }
       div[data-testid="stMetric"] { border: 1px solid rgba(128,128,128,.25);
           border-radius: 10px; padding: .7rem .9rem; }
@@ -108,7 +107,7 @@ school_ids = dataset.schools["school_id"].tolist()
 # Header and sidebar controls
 # --------------------------------------------------------------------------- #
 
-st.markdown('<p class="cc-title">🚌 Campus Cruise</p>', unsafe_allow_html=True)
+st.title("🚌 Campus Cruise")
 st.markdown(
     f'<p class="cc-sub">Where travel gets smarter. School bus sharing to {dataset.event.name}.</p>',
     unsafe_allow_html=True,
@@ -210,17 +209,17 @@ with tabs[0]:
         else:
             sv = savings(base, sol)
             pct = "n/a" if sv.percent is None else f"{sv.percent:.1f}%"
-            c = st.columns(6)
+            c = st.columns(3) + st.columns(3)
             c[0].metric("Total cost", money(sol.total_cost))
-            c[1].metric("Savings vs one bus per school", money(sv.absolute), pct,
-                        delta_color="normal" if sv.absolute >= 0 else "inverse")
-            c[2].metric("Buses", len(sol.routes), f"{len(sol.routes) - len(base.routes)} vs baseline",
+            c[1].metric("Savings", money(sv.absolute), pct,
+                        help="Compared with every school renting its own cheapest bus.")
+            c[2].metric("Buses", len(sol.routes), f"{len(sol.routes) - len(base.routes):+d} vs baseline",
                         delta_color="inverse")
             c[3].metric("Attendees", sol.total_attendees)
             c[4].metric("Seat utilisation", f"{sol.utilisation * 100:.1f}%",
                         f"{(sol.utilisation - base.utilisation) * 100:+.1f} pts")
-            c[5].metric("Solver runtime", f"{sol.runtime_s:.1f} s", f"limit {sol.time_limit_s:g} s",
-                        delta_color="off")
+            c[5].metric("Solver runtime", f"{sol.runtime_s:.1f} s of {sol.time_limit_s:g} s",
+                        help="Time the solver used, out of the time limit set in the sidebar.")
 
             left, right = st.columns([3, 2])
             with left:
@@ -288,7 +287,7 @@ def load_road_paths(sol, ds) -> tuple[dict, list[str]]:
 def draw_map(sol, ds, paths=None):
     paths = paths or {}
     e = ds.event
-    fmap = folium.Map(location=[51.66, -3.5], zoom_start=9, tiles="OpenStreetMap")
+    fmap = folium.Map(location=[51.66, -3.5], zoom_start=9, tiles="OpenStreetMap", scrollWheelZoom=False)
     info = ds.schools.set_index("school_id")
     legend_rows = []
     for k, r in enumerate(sol.routes):
@@ -320,12 +319,13 @@ def draw_map(sol, ds, paths=None):
     folium.Marker([e.latitude, e.longitude], tooltip="Principality Stadium (event)",
                   icon=folium.Icon(color="black", icon="star")).add_to(fmap)
     legend = (
-        '<div style="position:fixed;bottom:18px;left:18px;z-index:9999;background:white;color:#222;'
+        '<details style="position:fixed;top:12px;right:12px;z-index:9999;background:white;color:#222;'
         'padding:8px 10px;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.3);font-size:11px;'
-        'max-height:260px;overflow-y:auto;max-width:320px">'
-        '<b>Buses</b> (marker size = attendees)<br>★ Stadium · solid = road path (OSRM) · '
-        'dashed = straight line, not road route'
-        + "".join(legend_rows) + "</div>"
+        'max-height:420px;overflow-y:auto;max-width:320px">'
+        f'<summary style="cursor:pointer;font-weight:600">Legend: {len(sol.routes)} buses</summary>'
+        '<div style="margin:4px 0">Marker size = attendees · ★ Stadium<br>'
+        'Solid line = road path (OSRM) · dashed = straight line, not road route</div>'
+        + "".join(legend_rows) + "</details>"
     )
     fmap.get_root().html.add_child(folium.Element(legend))
     return fmap
@@ -508,7 +508,7 @@ with tabs[4]:
     if rep.ok and not any(rep.capacity_errors.values()):
         st.success("All files valid. Every school fits on at least one available bus.")
 
-    left, right = st.columns([3, 2])
+    left, right = st.columns([1, 1])
     with left:
         st.subheader("Schools (pickup points)")
         st.caption("The data identifies schools by UK postcode outcode only; no school names are supplied.")
@@ -516,10 +516,11 @@ with tabs[4]:
     with right:
         st.subheader("Bus options")
         sizes = sorted({s for r in dataset.rates.values() for s in r})
-        bus_df = pd.DataFrame({"Bus size (seats)": sizes})
+        bus_df = pd.DataFrame({"Seats": sizes})
         for m in COST_MODELS:
             if m in dataset.rates:
-                bus_df[f"{MODEL_LABELS[m].split(' x ')[0]} ({MODEL_UNITS[m]})"] = [dataset.rates[m].get(s) for s in sizes]
+                header = {"fixed": "Per bus", "distance": "Per mile", "time": "Per hour"}[m]
+                bus_df[header] = [dataset.rates[m].get(s) for s in sizes]
         st.dataframe(bus_df, hide_index=True, width="stretch")
         st.subheader("Event")
         st.write(f"{dataset.event.name}  \n{dataset.event.latitude}, {dataset.event.longitude} (from the challenge data README)")
