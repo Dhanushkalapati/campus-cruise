@@ -9,6 +9,8 @@ from __future__ import annotations
 import hashlib
 import math
 import time
+import tomllib
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -1032,11 +1034,21 @@ def assistant_inputs():
     return working, build_context(working, current_constraints(), runs, model, plan)
 
 
+SECRETS_FILE = Path(__file__).resolve().parent / ".streamlit" / "secrets.toml"
+
+
 def get_provider():
     try:
         secrets = dict(st.secrets) if hasattr(st, "secrets") else {}
     except Exception:  # no secrets.toml: that is fine
         secrets = {}
+    # Streamlit only looks for secrets.toml in the folder the app was started from.
+    # Also read the project's own copy, so the key is found from any folder.
+    if SECRETS_FILE.exists():
+        try:
+            secrets = {**tomllib.loads(SECRETS_FILE.read_text(encoding="utf-8")), **secrets}
+        except (OSError, tomllib.TOMLDecodeError):
+            pass
     try:
         return provider_from_config(secrets), None
     except AssistantUnavailable as exc:
