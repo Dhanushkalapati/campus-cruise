@@ -1,11 +1,45 @@
-.venv/
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
 .pytest_cache/
+.ipynb_checkpoints/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Secrets and local environment files (never commit API keys)
+.env
+.env.*
 .streamlit/secrets.toml
+
 # Caches are local, except the bundled OSRM road-time matrix for the default schools,
 # so a fresh deployment has road times without calling OSRM.
 data/cache/*
 !data/cache/osrm_1965645e223a1b27.json
+
+# Generated outputs (demo.py, benchmark.py, eval_assistant.py)
 demo_output/
+*.log
+
+# Node tooling
 node_modules/
+package-lock.json
+
+# Editors and operating systems
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Office lock files and backups
+~$*
+*.bak
+*.tmp
+

@@ -788,7 +788,7 @@ with st.sidebar:
         if auto and model != "fixed":
             st.caption(f"Each automatic run can take up to {time_limit} s.")
     st.caption(f"Costs are in {CURRENCY_LABEL}; the data states no currency.")
-    st.caption("Campus Cruise · by **Dhanush Kalapati**, Cardiff University")
+    st.caption("Campus Cruise · by **Dhanush Kalapati**, **Samyaka Nadavala** and **Sathwika Orugonda**, Cardiff University")
 
 # --------------------------------------------------------------------------- #
 # Run

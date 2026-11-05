@@ -753,7 +753,7 @@ Never run a 300 s routing search live; show the benchmark table.
 
 ## 13. Additions on 2026-10-25
 
-Checked against the competition brief (`hcch-student-competition-details.pdf`).
+Checked against the competition brief.
 
 - **Bus-distance impact** (`distance_impact` in `src/explain.py`). Bus-miles saved = baseline total
   bus-miles − plan total bus-miles, from the same straight-line matrix and route rule; driving hours
@@ -778,11 +778,11 @@ Checked against the competition brief (`hcch-student-competition-details.pdf`).
 
 ---
 
-*Files referenced:* [`app.py`](app.py), [`src/solvers.py`](src/solvers.py),
-[`src/validation.py`](src/validation.py), [`src/distances.py`](src/distances.py),
-[`src/planner.py`](src/planner.py), [`src/data.py`](src/data.py), [`src/report.py`](src/report.py),
-[`src/model.py`](src/model.py), [`src/assistant.py`](src/assistant.py),
-[`src/freshness.py`](src/freshness.py), [`src/explain.py`](src/explain.py),
-[`src/mapview.py`](src/mapview.py), [`src/ml_travel_time.py`](src/ml_travel_time.py),
-[`train_travel_time.py`](train_travel_time.py), [`benchmark.py`](benchmark.py),
-[`eval_assistant.py`](eval_assistant.py), [`tests/`](tests/).
+*Files referenced:* [`app.py`](../app.py), [`src/solvers.py`](../src/solvers.py),
+[`src/validation.py`](../src/validation.py), [`src/distances.py`](../src/distances.py),
+[`src/planner.py`](../src/planner.py), [`src/data.py`](../src/data.py), [`src/report.py`](../src/report.py),
+[`src/model.py`](../src/model.py), [`src/assistant.py`](../src/assistant.py),
+[`src/freshness.py`](../src/freshness.py), [`src/explain.py`](../src/explain.py),
+[`src/mapview.py`](../src/mapview.py), [`src/ml_travel_time.py`](../src/ml_travel_time.py),
+[`train_travel_time.py`](../train_travel_time.py), [`benchmark.py`](../benchmark.py),
+[`eval_assistant.py`](../eval_assistant.py), [`tests/`](../tests/).
