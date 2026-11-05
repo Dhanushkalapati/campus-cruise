@@ -235,5 +235,11 @@ def test_price_scenario_cannot_be_adopted():
     assert sc["entry"]["key"] is None and sc["inputs"].changes_prices
     assert not [b for b in at.button if b.key == "scn_adopt"]
     assert any("for testing only" in i.value and "not used as the plan" in i.value for i in at.info)
-    base = sc["base"]["result"].solution.total_cost
-    assert sc["entry"]["result"].solution.total_cost == pytest.approx(base * 1.2)
+    # Check the prices, not the plan: with a 5 s limit the solver may pick a
+    # different bus mix in each run, so the totals need not differ by exactly 20%.
+    base_rates = sc["base"]["dataset"].rates["fixed"]
+    s_sol = sc["entry"]["result"].solution
+    assert s_sol.routes
+    for route in s_sol.routes:
+        assert route.cost == pytest.approx(base_rates[route.bus_size] * 1.2)
+    assert s_sol.total_cost == pytest.approx(sum(r.cost for r in s_sol.routes))

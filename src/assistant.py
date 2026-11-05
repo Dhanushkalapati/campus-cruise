@@ -1,7 +1,7 @@
 """AI Transport Planning Assistant.
 
 An organiser types a request in plain English. A language model (OpenAI or
-Claude, whichever key is configured) turns it into a structured proposal; this module then checks the proposal
+Anthropic, whichever key is configured) turns it into a structured proposal; this module then checks the proposal
 against the real data. The model never changes anything itself:
 
     request -> LLM proposal (JSON schema) -> validate_proposal() -> organiser
@@ -249,7 +249,7 @@ class OpenAIProvider:
 
 
 class AnthropicProvider:
-    """Claude via the official Anthropic SDK, with JSON-schema structured output."""
+    """Anthropic model via the official Anthropic SDK, with JSON-schema structured output."""
 
     vendor = "Anthropic"
     key_name = KEY_ENV
@@ -267,7 +267,7 @@ class AnthropicProvider:
 
     @property
     def label(self) -> str:
-        return f"Claude ({self.model})"
+        return f"Anthropic ({self.model})"
 
     def complete_json(self, system: str, user: str, schema: dict) -> dict:
         # fallbacks="default": if a safety classifier declines, the API retries

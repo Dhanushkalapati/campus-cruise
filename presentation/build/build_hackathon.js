@@ -419,7 +419,7 @@ pres.addSection({ title: "Close" });
   card(s, 0.5, 3.95, 9, 1.1, H.lt2, "AI disclosure");
   T(s, [
     { text: "Generative AI disclosure. ", options: { bold: true } },
-    { text: "Claude (Anthropic, via Claude Code) helped write and test the code and draft the documentation, speaker script and this presentation. ChatGPT (OpenAI) was also used as a writing and planning aid. Dhanush reviewed, ran and tested all output. Separately, the app's optional assistant calls OpenAI GPT-4.1 mini at run time as a product feature." },
+    { text: "AI coding assistants helped write and test the code and draft the documentation, speaker script and this presentation. ChatGPT (OpenAI) was also used as a writing and planning aid. Dhanush reviewed, ran and tested all output. Separately, the app's optional assistant calls OpenAI GPT-4.1 mini at run time as a product feature." },
   ], { x: 0.7, y: 3.95, w: 8.6, h: 1.1, fontSize: 11, valign: "middle" });
   notes(s, 10, "Conclusion, next steps and AI disclosure", "5:50-6:10 (20 s)",
     `Campus Cruise finds which schools should share a bus: ${n1(F.saving_percent)}% cheaper on the challenge data, ${F.optimised_buses} buses instead of ${F.baseline_buses}, proven optimal and independently checked. Next, I'd like to pilot it with a Welsh event organiser. My AI-use disclosure is on the slide. Thank you, I'm happy to take questions.`,

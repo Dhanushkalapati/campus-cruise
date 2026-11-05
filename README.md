@@ -485,10 +485,9 @@ No group has tested or endorsed Campus Cruise; no stakeholder feedback has been 
 The competition asks entrants to declare generative AI tools used to draft the submission or
 presentation.
 
-- **Claude Code (Anthropic; Claude Opus models)** was used to write and refactor code, write tests,
-  audit the project against the brief, and draft documentation (this README,
-  `PROJECT_TECHNICAL_REPORT.md`, the pitch deck). The team reviewed, ran and tested the output.
-- **TEAM TO CONFIRM:** list any other tools used (for example for the EOI, slides or images) and how.
+- AI coding and writing assistants were used to help write and refactor code, write tests,
+  and draft documentation (this README, `PROJECT_TECHNICAL_REPORT.md`, the pitch deck).
+  The author reviewed, ran and tested all output.
 
 Separately, the app itself can call a language model (OpenAI or Anthropic) at run time; that is a
 feature of the product, described in *AI Transport Planning Assistant*.
